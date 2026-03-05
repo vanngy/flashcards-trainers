@@ -39,6 +39,7 @@ export function AnswerInput({ feedback }) {
       if (mcBtn && onMarkCorrect) {
         mcBtn.addEventListener('click', onMarkCorrect);
       }
+
     },
   };
 }

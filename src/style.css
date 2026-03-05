@@ -9,12 +9,13 @@
   --bg:          #f7f6f3;
   --surface:     #ffffff;
   --border:      #e5e3dc;
-  --accent:      #4f8ef7;
-  --accent-light:#eef4ff;
-  --success:     #34a853;
-  --success-light:#e8f5e9;
-  --error:       #e05c5c;
-  --error-light: #fce8e8;
+  --accent:          #3b82f6;
+  --accent-light:    #eef4ff;
+  --accent-mastered: #1B5E36;
+  --success:         #34a853;
+  --success-light:   #e8f5e9;
+  --error:           #e05c5c;
+  --error-light:     #ffeaea;
   --text:        #2d2d2d;
   --text-muted:  #888888;
 
@@ -211,7 +212,7 @@ h2 {
 .batch-pill__date { font-size: 0.7rem; opacity: 0.7; font-weight: 400; }
 
 /* status colours */
-.batch-pill--mastered    { border-color: var(--success); color: var(--success); background: var(--success-light); }
+.batch-pill--mastered    { border-color: var(--accent-mastered); color: var(--accent-mastered); background: var(--success-light); }
 .batch-pill--in-progress { border-color: #e8a000; color: #7a5000; background: #fff8e1; }
 .batch-pill--available   { border-color: var(--border); color: var(--text-muted); background: var(--surface); }
 .batch-pill--locked      { opacity: 0.4; }
@@ -770,6 +771,13 @@ h2 {
   margin-left: 4px;
 }
 
+/* ── Wrong-answer card state ────────────────────────────────────────────── */
+.card--wrong {
+  border: 2px solid var(--error);
+  background: var(--error-light);
+  animation: wiggle 0.5s ease;
+}
+
 /* ── Animations ─────────────────────────────────────────────────────────── */
 .fade-in {
   animation: fadeIn 0.18s ease;
@@ -777,6 +785,13 @@ h2 {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes wiggle {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-6px); }
+  40%       { transform: translateX(6px); }
+  60%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
 }
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */

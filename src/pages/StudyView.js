@@ -75,7 +75,8 @@ export function StudyView(state, navigate) {
     </div>
   `;
 
-  const sc = StudyCard({ card, summary });
+  const isWrong = !session.rewriteMode && !!session.feedback;
+  const sc = StudyCard({ card, summary, wrong: isWrong });
 
   // ── Rewrite mode ──────────────────────────────────────────────────────────
   if (session.rewriteMode) {
