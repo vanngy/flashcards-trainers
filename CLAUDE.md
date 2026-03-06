@@ -71,27 +71,41 @@ Builds a tree of nodes from card `topic` / `subtopic` / `subsubtopic` fields. Ea
 - `currentBatchOf(card, deckCardIndex, deck)` / `batchCountFor(card, deck)` — batch lookup helpers used in editors
 - `batchOptionsHtml(card, cardIndex, deck)` — renders `<option>` elements for batch selectors in editors
 
+### Card learning state (`src/logic/progressUtils.js`)
+Progress is tracked **per card** via a `learningState` field mutated in place on the card object:
+
+`unseen → in-progress → learned → mastered`
+
+- `applyCardOutcome(card, outcome, today)` — transitions card state based on `outcome: 'strong' | 'weak' | 'failed'`
+  - `strong`: increments `consecutiveStrong`; promotes `in-progress → learned` at 1, `learned → mastered` at 2
+  - `weak`: resets streak; demotes `mastered → learned`
+  - `failed`: resets streak; demotes `learned | mastered → in-progress`
+- `deriveBatchState(cards)` — derives `'unseen' | 'in-progress' | 'learned' | 'mastered'` from a batch's cards (batch status is never stored directly)
+- `computeEffectiveUnlocked(batchStates)` — batch N unlocks when batch N-1 is `learned` or `mastered`
+- `findContinueBatch(deck)` / `findContinueBatchForNode(node)` — returns the batch index to study next (first non-learned, then first learned-not-mastered, then null)
+
 ### Progress object structure
 Stored on each deck at `deck.progress`:
 ```js
 {
-  highestUnlockedBatch: 0,       // index of the furthest unlocked batch
+  highestUnlockedBatch: 0,   // floor for unlock (real unlock derived from card states)
   deckComplete: false,
-  batches: [                     // one entry per batch
-    { status: 'unseen' | 'in-progress' | 'mastered', lastStudied: 'YYYY-MM-DD' | null }
-  ]
+  batches: []                // legacy; batch state is derived via deriveBatchState()
 }
 ```
-`topicProgress` (persisted separately) maps `pathKey → { highestUnlockedBatch, deckComplete, batches }` for topic-mode nodes.
+Card fields added at runtime (persisted on `d.cards`): `learningState`, `consecutiveStrong`, `learnedAt?`, `masteredAt?`
+
+`topicProgress` (persisted separately) maps `pathKey → { highestUnlockedBatch, deckComplete }` for topic-mode nodes.
 
 ### Study session (`src/logic/studySession.js`)
 In-memory state machine passed through `state.session`. Key functions:
 - `createSession(studyTarget, batchIndex, deckId)` — `studyTarget` is either a deck or a topic-tree node (both have `.batches`)
-- `submitAnswer(session, typed)` — returns `{ correct, rewriteTriggered, roundComplete, batchUnlocked }`. After **2 wrong attempts** on the same card, `rewriteMode` is set and the round is marked unclean.
-- `markCorrect(session)` — typo-forgiveness: advances card as correct without setting `isRoundClean = false` (round stays clean, no rewrite flag)
-- `getSessionSummary(session)` — returns `{ batchIndex, cardIndex, totalCards, phase, cleanStreak }`
+- `submitAnswer(session, typed)` — returns `{ correct, rewriteTriggered, roundComplete, batchUnlocked }`. On 1st/2nd wrong: sets `showSolution = true`, records outcome `'weak'`. On **3rd wrong**: sets `rewriteMode = true`, records `'failed'`.
+- `continueSolution(session)` — clears `showSolution` without advancing card (user retries same card)
+- `markCorrect(session)` — typo-forgiveness: advances card as `'strong'` regardless of prior wrongs
+- `getSessionSummary(session)` — returns `{ batchIndex, cardIndex, totalCards }`
 
-Session phases: `'initial'` (first pass through batch) → `'mastery'` (requires 2 clean rounds to unlock next batch). A round is clean only if no card triggered rewrite mode.
+Each card's outcome (`'strong'` by default, `'weak'`, or `'failed'`) is tracked in `session.cardOutcomes` (Map). On round complete, `applyCardOutcome` is called for every card, mutating `learningState` in place, then `saveToStorage` is called by the caller.
 
 ### Answer checking (`src/logic/checkAnswer.js`)
 Strips punctuation/symbols (`[^\p{L}\p{N}\s]`) and collapses whitespace before comparing. Case-sensitive.
@@ -103,6 +117,9 @@ Two accepted formats:
 - **5-column topic**: `topic,subtopic,subsubtopic,front,back`
 
 UTF-8 BOM is stripped automatically. Multi-line quoted fields are supported. Also exports `exportDeckAsCsv(deck)` which triggers a file download.
+
+### PWA
+`sw.js` is a cache-first service worker that caches all app assets under `flashcard-trainer-v{N}`. Bump the version constant when adding new files to the asset list.
 
 ### Utilities
 - `src/utils.js` — exports `escapeHtml(str)` for safe HTML insertion
