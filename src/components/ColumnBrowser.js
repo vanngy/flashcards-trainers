@@ -1,4 +1,5 @@
 import { BatchProgress } from './BatchProgress.js';
+import { deriveBatchState, findContinueBatchForNode, computeEffectiveUnlocked } from '../logic/progressUtils.js';
 
 function escHtml(str) {
   return String(str)
@@ -15,16 +16,42 @@ function collectLeafNodes(nodes, acc) {
   }
 }
 
+// A node is "learned" when all its direct cards (or recursively all leaf cards) are >= learned.
+function isNodeLearned(node) {
+  if (node.directCards.length > 0) {
+    return node.directCards.every(c => {
+      const s = c.learningState ?? 'unseen';
+      return s === 'learned' || s === 'mastered';
+    });
+  }
+  if (node.children.length === 0) return false;
+  return node.children.every(child => isNodeLearned(child));
+}
+
+function computeLockedSet(items) {
+  const locked = new Set();
+  for (let i = 1; i < items.length; i++) {
+    if (!isNodeLearned(items[i - 1])) {
+      locked.add(items[i].label);
+    }
+  }
+  return locked;
+}
+
+// Progress bar showing % of cards learned within child topics
 function childProgressHtml(children) {
   const rows = children.map(child => {
     const leaves = [];
     collectLeafNodes([child], leaves);
-    let mastered = 0, total = 0;
+    let learned = 0, total = 0;
     for (const leaf of leaves) {
-      total += leaf.batches.length;
-      mastered += (leaf.progress?.batches || []).filter(b => b.status === 'mastered').length;
+      for (const card of leaf.directCards) {
+        total++;
+        const s = card.learningState ?? 'unseen';
+        if (s === 'learned' || s === 'mastered') learned++;
+      }
     }
-    const pct = total > 0 ? Math.round(mastered / total * 100) : 0;
+    const pct = total > 0 ? Math.round(learned / total * 100) : 0;
     return `
       <div class="topic-progress__row">
         <span class="topic-progress__label">${escHtml(child.label)}</span>
@@ -35,24 +62,7 @@ function childProgressHtml(children) {
   return `<div class="topic-progress">${rows}</div>`;
 }
 
-function isNodeMastered(node) {
-  if (node.directCards.length > 0) {
-    return node.progress?.deckComplete === true;
-  }
-  if (node.children.length === 0) return false;
-  return node.children.every(child => isNodeMastered(child));
-}
-
-function computeLockedSet(items) {
-  const locked = new Set();
-  for (let i = 1; i < items.length; i++) {
-    if (!isNodeMastered(items[i - 1])) {
-      locked.add(items[i].label);
-    }
-  }
-  return locked;
-}
-
+// onStudy(node, batchIndex) — caller creates the session
 export function ColumnBrowser({ topicTree, selectedPath, onSelect, onStudy }) {
   // Walk selectedPath to resolve selectedNodes[0..2]
   const selectedNodes = [];
@@ -103,31 +113,37 @@ export function ColumnBrowser({ topicTree, selectedPath, onSelect, onStudy }) {
     : false;
 
   let panelHtml = '';
+  let activeContinueBatch = null;
+  let bp = null;  // hoisted so bind() can reference it
+
   if (activeNode) {
     if (activeNode.batches.length > 0) {
-      const bp = BatchProgress({
+      const batchStates = activeNode.batches.map(b => deriveBatchState(b));
+      bp = BatchProgress({
         batches: activeNode.batches,
         batchProgress: activeNode.progress.batches,
-        highestUnlocked: activeNode.progress.highestUnlockedBatch,
-        deckComplete: activeNode.progress.deckComplete || false,
+        batchStates,
+        highestUnlocked: computeEffectiveUnlocked(batchStates),
       });
+
+      activeContinueBatch = findContinueBatchForNode(activeNode);
+
       let btnHtml;
-      if (activeNode.progress.deckComplete) {
-        btnHtml = `<p class="deck-complete-msg">All batches mastered!</p>`;
-      } else if (isActiveLocked) {
+      if (isActiveLocked) {
         btnHtml = `<button class="btn btn--primary btn--full study-btn" disabled>🔒 Locked</button>`;
+      } else if (activeContinueBatch !== null) {
+        const isFirstStudy = activeContinueBatch === 0 && batchStates[0] === 'unseen';
+        const label = isFirstStudy ? 'Start Batch 1' : `Continue — Batch ${activeContinueBatch + 1}`;
+        btnHtml = `<button class="btn btn--primary btn--full study-btn">${label}</button>`;
       } else {
-        btnHtml = `<button class="btn btn--primary btn--full study-btn">
-            ${activeNode.progress.highestUnlockedBatch === 0
-              ? 'Start Batch 1'
-              : `Continue — Batch ${activeNode.progress.highestUnlockedBatch + 1}`}
-           </button>`;
+        btnHtml = `<p class="deck-complete-msg">All cards learned!</p>`;
       }
+
       panelHtml = `
         <div class="col-browser__panel">
           <div class="col-browser__panel-title">${escHtml(activeNode.label)}</div>
           <div class="col-browser__panel-meta">${activeNode.directCards.length} cards &middot; ${activeNode.batches.length} batch${activeNode.batches.length !== 1 ? 'es' : ''}</div>
-          ${bp.html}
+          <div class="cb-bp-mount">${bp.html}</div>
           ${btnHtml}
         </div>`;
     } else if (activeNode.children.length > 0) {
@@ -165,8 +181,14 @@ export function ColumnBrowser({ topicTree, selectedPath, onSelect, onStudy }) {
       const studyBtn = root.querySelector('.study-btn');
       if (studyBtn) {
         studyBtn.addEventListener('click', () => {
-          if (!isActiveLocked) onStudy(activeNode);
+          if (!isActiveLocked && activeContinueBatch !== null) {
+            onStudy(activeNode, activeContinueBatch);
+          }
         });
+      }
+      const bpMount = root.querySelector('.cb-bp-mount');
+      if (bpMount && bp && activeNode && !isActiveLocked) {
+        bp.bind(bpMount, batchIdx => onStudy(activeNode, batchIdx));
       }
     },
   };

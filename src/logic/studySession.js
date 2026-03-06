@@ -1,21 +1,24 @@
 import { checkAnswer } from './checkAnswer.js';
+import { applyCardOutcome, deriveBatchState, todayStr } from './progressUtils.js';
 
 // createSession — initialise a fresh in-memory session for one batch
 export function createSession(studyTarget, batchIndex, deckId) {
+  const originalBatch = studyTarget.batches[batchIndex];
   return {
     deck: studyTarget,
     deckId: deckId ?? studyTarget.id,
     batchIndex,
-    batch: studyTarget.batches[batchIndex],
+    originalBatch,
+    batch: originalBatch,
     cardIndex: 0,
-    attemptCount: 0,    // wrong attempts on current card (0, 1)
+    attemptCount: 0,    // wrong attempts on current card this cycle
     rewriteMode: false,
-    phase: 'initial',   // 'initial' | 'mastery'
-    isRoundClean: true, // no rewrite triggered this round
-    cleanStreak: 0,     // clean mastery rounds in a row
+    showSolution: false,
+    lastTyped: null,
+    cardOutcomes: new Map(),  // card → 'strong' | 'weak' | 'failed'
     showRoundSummary: false,
     lastRoundResult: null,
-    feedback: null,     // null | { type, msg }
+    feedback: null,
   };
 }
 
@@ -38,9 +41,8 @@ export function submitAnswer(session, typed) {
       session.attemptCount = 0;
       session.feedback = null;
       advanceCard(session, result);
-    } else {
-      session.feedback = { type: 'incorrect', msg: 'Not quite — try rewriting again.' };
     }
+    // wrong in rewrite mode: stay in rewrite silently
   } else {
     if (correct) {
       session.feedback = null;
@@ -48,13 +50,19 @@ export function submitAnswer(session, typed) {
       advanceCard(session, result);
     } else {
       session.attemptCount++;
-      if (session.attemptCount >= 2) {
-        session.isRoundClean = false;
+      session.lastTyped = typed;
+      if (session.attemptCount >= 3) {
+        // 3rd wrong: enter rewrite mode, mark as failed
         session.rewriteMode = true;
         session.feedback = null;
         result.rewriteTriggered = true;
+        session.cardOutcomes.set(card, 'failed');
       } else {
-        session.feedback = { type: 'incorrect', msg: 'Incorrect. Try again.' };
+        // 1st or 2nd wrong: show solution
+        session.showSolution = true;
+        if (session.cardOutcomes.get(card) !== 'failed') {
+          session.cardOutcomes.set(card, 'weak');
+        }
       }
     }
   }
@@ -62,63 +70,69 @@ export function submitAnswer(session, typed) {
   return result;
 }
 
+// continueSolution — called when user presses Continue after viewing solution
+export function continueSolution(session) {
+  session.showSolution = false;
+  // cardIndex is NOT advanced — user retries the same card
+}
+
 function advanceCard(session, result) {
   session.cardIndex++;
   if (session.cardIndex >= session.batch.length) {
     result.roundComplete = true;
-    completeRound(session, result);
+    completeSession(session, result);
   }
 }
 
-function completeRound(session, result) {
-  if (session.phase === 'initial') {
-    // Initial pass done — enter mastery phase fresh
-    session.phase = 'mastery';
-    session.cardIndex = 0;
-    session.attemptCount = 0;
-    session.isRoundClean = true;
-    session.feedback = null;
-    session.showRoundSummary = true;
-    session.lastRoundResult = { phase: 'initial', batchUnlocked: false, deckComplete: false, cleanStreak: 0 };
-  } else {
-    // Mastery round finished
-    if (session.isRoundClean) {
-      session.cleanStreak++;
-    } else {
-      session.cleanStreak = 0;
-    }
+function completeSession(session, result) {
+  const today = todayStr();
+  const cardDiffs = [];
 
-    if (session.cleanStreak >= 2) {
-      result.batchUnlocked = true;
-      const hasNext = session.batchIndex + 1 < session.deck.batches.length;
-      session.showRoundSummary = true;
-      session.lastRoundResult = {
-        phase: 'mastery',
-        batchUnlocked: true,
-        deckComplete: !hasNext,
-        cleanStreak: session.cleanStreak,
-      };
-    } else {
-      // Keep going — reset for next mastery round
-      session.cardIndex = 0;
-      session.attemptCount = 0;
-      session.isRoundClean = true;
-      session.feedback = null;
-      session.showRoundSummary = true;
-      session.lastRoundResult = {
-        phase: 'mastery',
-        batchUnlocked: false,
-        deckComplete: false,
-        cleanStreak: session.cleanStreak,
-      };
-    }
+  for (const card of session.originalBatch) {
+    const previousState = card.learningState ?? 'unseen';
+    const outcome = session.cardOutcomes.get(card) ?? 'strong';
+    applyCardOutcome(card, outcome, today);
+    cardDiffs.push({ card, previousState, newState: card.learningState, outcome });
   }
+
+  // Update stored highestUnlockedBatch (used as a floor; display is derived from card states).
+  const batchState = deriveBatchState(session.originalBatch);
+  if (batchState === 'learned' || batchState === 'mastered') {
+    const prog = session.deck.progress;
+    const hasNext = session.batchIndex + 1 < session.deck.batches.length;
+    if (hasNext) {
+      prog.highestUnlockedBatch = Math.max(prog.highestUnlockedBatch, session.batchIndex + 1);
+    }
+    result.batchUnlocked = true;
+  }
+
+  // Check deck learning complete (all batches learned or mastered)
+  const allLearned = session.deck.batches.every(b => {
+    const bs = deriveBatchState(b);
+    return bs === 'learned' || bs === 'mastered';
+  });
+  if (allLearned) {
+    session.deck.progress.deckComplete = true;
+    result.deckComplete = true;
+  }
+
+  session.showRoundSummary = true;
+  session.lastRoundResult = {
+    cardDiffs,
+    batchUnlocked: result.batchUnlocked || false,
+    deckComplete: result.deckComplete || false,
+    batchState,
+  };
 }
 
-// markCorrect — typo forgiveness: count current card as correct without penalty.
-// The round stays clean (no rewrite flag set).
+// markCorrect — typo forgiveness: treat the current card as strongly correct.
+// Clears any weak/failed outcome recorded so far for this card.
 export function markCorrect(session) {
+  const card = session.batch[session.cardIndex];
+  session.cardOutcomes.delete(card);  // revert to default 'strong'
   session.rewriteMode = false;
+  session.showSolution = false;
+  session.lastTyped = null;
   session.attemptCount = 0;
   session.feedback = null;
   const result = { correct: true, rewriteTriggered: false, roundComplete: false, batchUnlocked: false };
@@ -131,7 +145,5 @@ export function getSessionSummary(session) {
     batchIndex: session.batchIndex,
     cardIndex: session.cardIndex,
     totalCards: session.batch.length,
-    phase: session.phase,
-    cleanStreak: session.cleanStreak,
   };
 }

@@ -1,4 +1,5 @@
 import { splitIntoBatches } from './splitIntoBatches.js';
+import { deriveBatchState, migrateCardState } from './progressUtils.js';
 
 export function slugify(label) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
@@ -52,7 +53,7 @@ export function buildTopicTree(cards, topicProgressMap = {}) {
     deepestNode.directCards.push(card);
   }
 
-  // Pass 2: attach batches + progress to every node with directCards
+  // Pass 2: attach batches + progress to every leaf node
   for (const node of Object.values(nodeMap)) {
     if (node.directCards.length === 0) continue;
     const hasExplicit = node.directCards.some(c => typeof c.batchIndex === 'number');
@@ -67,20 +68,32 @@ export function buildTopicTree(cards, topicProgressMap = {}) {
     } else {
       node.batches = splitIntoBatches(node.directCards);
     }
+
     const saved = topicProgressMap[node.pathKey];
-    const batchStatuses = node.batches.map((_, i) => {
-      if (saved?.batches?.[i]) return saved.batches[i];
-      const hob = saved?.highestUnlockedBatch ?? 0;
-      if (!saved?.batches) {
-        if (i < hob) return { status: 'mastered', lastStudied: null };
-        if (i === hob && hob > 0) return { status: 'in-progress', lastStudied: null };
+
+    // Migrate cards in this node that lack learningState
+    for (let i = 0; i < node.batches.length; i++) {
+      const oldStatus = saved?.batches?.[i]?.status ?? 'unseen';
+      for (const card of node.batches[i]) {
+        migrateCardState(card, oldStatus);
       }
-      return { status: 'unseen', lastStudied: null };
-    });
+    }
+
+    // Recompute highestUnlockedBatch from current card states
+    let computedHob = saved?.highestUnlockedBatch ?? 0;
+    for (let i = 0; i < node.batches.length; i++) {
+      const bs = deriveBatchState(node.batches[i]);
+      if ((bs === 'learned' || bs === 'mastered') && i + 1 < node.batches.length) {
+        computedHob = Math.max(computedHob, i + 1);
+      }
+    }
+
     node.progress = {
-      highestUnlockedBatch: saved?.highestUnlockedBatch ?? 0,
+      highestUnlockedBatch: computedHob,
       deckComplete: saved?.deckComplete ?? false,
-      batches: batchStatuses,
+      batches: node.batches.map((_, i) => ({
+        lastStudied: saved?.batches?.[i]?.lastStudied ?? null,
+      })),
     };
   }
 

@@ -11,9 +11,11 @@ export function DeckList({ decks }) {
   }
 
   const items = decks.map(deck => {
-    const batchLabel = deck.progress.deckComplete
-      ? 'Complete!'
-      : `Batch ${deck.progress.highestUnlockedBatch + 1} of ${deck.batches.length}`;
+    const total    = deck.cards.length;
+    const learned  = deck.cards.filter(c => c.learningState === 'learned' || c.learningState === 'mastered').length;
+    const batchLabel = deck.progress.deckComplete || learned === total && total > 0
+      ? `All ${total} cards learned`
+      : `${learned} / ${total} learned`;
     return `
       <li class="deck-item" data-id="${escapeHtml(deck.id)}">
         <div class="deck-item__body">

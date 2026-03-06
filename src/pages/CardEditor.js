@@ -2,9 +2,10 @@ import { escapeHtml as escHtml } from '../utils.js';
 import { makeDeck } from '../logic/makeDeck.js';
 import { saveToStorage } from '../storage.js';
 import { batchOptionsHtml, currentBatchOf } from '../logic/batchUtils.js';
+import { createSession } from '../logic/studySession.js';
 
 export function CardEditor(state, navigate) {
-  const { deckId, cardIndex } = state.routeParams;
+  const { deckId, cardIndex, fromStudy, batchIndex: studyBatchIndex } = state.routeParams;
   const deck = state.decks.find(d => d.id === deckId);
   if (!deck || cardIndex == null) { navigate('home', {}); return { html: '', bind() {} }; }
 
@@ -86,9 +87,14 @@ export function CardEditor(state, navigate) {
         });
         const rebuilt  = makeDeck(deck.id, deck.title, newCards, newProgress, newTopicProgress, deck.batchNames || []);
         state.decks[state.decks.findIndex(d => d.id === deckId)] = rebuilt;
-        state.session = null; // session is stale after card edit
         saveToStorage(state);
-        navigate('deck', { deckId });
+        if (fromStudy && !batchChanged && studyBatchIndex != null) {
+          state.session = createSession(rebuilt, studyBatchIndex, deckId);
+          navigate('study', { deckId });
+        } else {
+          state.session = null;
+          navigate('deck', { deckId });
+        }
       });
     },
   };

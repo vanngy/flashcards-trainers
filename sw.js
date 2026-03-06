@@ -1,4 +1,4 @@
-const CACHE = 'flashcard-trainer-v2';
+const CACHE = 'flashcard-trainer-v13';
 
 const ASSETS = [
   '.',
@@ -11,6 +11,7 @@ const ASSETS = [
   'src/sync.js',
   'src/utils.js',
   'src/logic/checkAnswer.js',
+  'src/logic/progressUtils.js',
   'src/logic/studySession.js',
   'src/logic/splitIntoBatches.js',
   'src/logic/parseCsv.js',
@@ -26,6 +27,7 @@ const ASSETS = [
   'src/components/StudyCard.js',
   'src/components/AnswerInput.js',
   'src/components/RewritePrompt.js',
+  'src/components/WrongAnswer.js',
   'src/components/RoundSummary.js',
   'src/components/BatchProgress.js',
   'src/components/DeckImporter.js',

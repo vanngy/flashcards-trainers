@@ -1,55 +1,82 @@
-// Displayed between rounds.
-// lastRoundResult = { phase, batchUnlocked, deckComplete, cleanStreak }
-// bind(root, onContinue)
-export function RoundSummary({ lastRoundResult }) {
-  const { phase, batchUnlocked, deckComplete, cleanStreak } = lastRoundResult;
+// Session summary displayed after each batch session.
+// lastRoundResult = { cardDiffs, batchUnlocked, deckComplete, batchState }
+// cardDiffs = [{ card, previousState, newState, outcome }]
+// nextBatchLabel: string like "Batch 3" if a new batch is available, otherwise null
+// bind(root, { onRepeat, onProceed, onBack })
+export function RoundSummary({ lastRoundResult, nextBatchLabel }) {
+  const { cardDiffs, batchUnlocked, deckComplete } = lastRoundResult;
 
-  let title, subtitle, btnLabel;
+  const stateOrder = s => ({ unseen: 0, 'in-progress': 1, learned: 2, mastered: 3 }[s] ?? 0);
 
-  if (deckComplete) {
-    title = 'Deck complete!';
-    subtitle = 'You have mastered every batch. Great work.';
-    btnLabel = 'Back to Deck';
-  } else if (batchUnlocked) {
-    title = 'Next batch unlocked!';
-    subtitle = 'Two clean rounds complete. Keep it up!';
-    btnLabel = 'View Deck';
-  } else if (phase === 'initial') {
-    title = 'First pass done!';
-    subtitle = 'Now complete 2 clean rounds (no rewrites) to unlock the next batch.';
-    btnLabel = 'Start Mastery';
-  } else if (cleanStreak === 0) {
-    title = 'Round complete';
-    subtitle = 'A card needed rewriting — streak reset. Try again!';
-    btnLabel = 'Try Again';
-  } else {
-    title = 'Clean round!';
-    subtitle = 'One more clean round to unlock the next batch.';
-    btnLabel = 'Next Round';
+  const promoted     = cardDiffs.filter(d => stateOrder(d.newState) > stateOrder(d.previousState));
+  const demoted      = cardDiffs.filter(d => stateOrder(d.newState) < stateOrder(d.previousState));
+  const streakReset  = cardDiffs.filter(d =>
+    d.outcome !== 'strong' &&
+    d.newState === d.previousState &&
+    d.previousState !== 'unseen'
+  );
+  const unchanged    = cardDiffs.filter(d =>
+    d.outcome === 'strong' &&
+    d.newState === d.previousState &&
+    d.previousState !== 'unseen'
+  );
+  const firstEncounter = cardDiffs.filter(d => d.previousState === 'unseen');
+
+  const movedToMastered  = promoted.filter(d => d.newState === 'mastered');
+  const movedToLearned   = promoted.filter(d => d.newState === 'learned');
+  const droppedToInProg  = demoted.filter(d => d.newState === 'in-progress');
+  const slippedToLearned = demoted.filter(d => d.newState === 'learned');
+
+  function line(cls, symbol, count, label) {
+    if (!count) return '';
+    const s = count !== 1 ? 's' : '';
+    return `<div class="summary-line summary-line--${cls}">${symbol} ${count} card${s} ${label}</div>`;
   }
 
-  const pip1 = cleanStreak >= 1 && phase !== 'initial' ? 'pip--filled' : '';
-  const pip2 = cleanStreak >= 2 ? 'pip--filled' : '';
+  const linesHtml = [
+    line('up',      '↑', movedToMastered.length,  'moved to mastered'),
+    line('up',      '↑', movedToLearned.length,   'moved to learned'),
+    line('down',    '↓', droppedToInProg.length,  'dropped to in progress'),
+    line('slip',    '↓', slippedToLearned.length, 'slipped from mastered to learned'),
+    line('reset',   '∼', streakReset.length,      'had streak reset'),
+    line('neutral', '→', unchanged.length,         'unchanged'),
+    line('neutral', '→', firstEncounter.length,    'encountered for the first time'),
+  ].join('');
 
-  const unlockHtml = batchUnlocked && !deckComplete
-    ? `<p class="unlock-msg">Next batch unlocked!</p>`
-    : '';
+  const learnedCount = cardDiffs.filter(d =>
+    d.newState === 'learned' || d.newState === 'mastered'
+  ).length;
+  const total = cardDiffs.length;
+
+  const noticeHtml = [
+    deckComplete ? `<p class="unlock-msg">All cards learned — deck complete!</p>` : '',
+    batchUnlocked && !deckComplete ? `<p class="unlock-msg">Next batch unlocked!</p>` : '',
+  ].join('');
+
+  const buttonsHtml = nextBatchLabel
+    ? `
+      <button class="btn btn--primary btn--full proceed-btn">Proceed — ${nextBatchLabel}</button>
+      <button class="btn btn--secondary btn--full repeat-btn">Repeat this batch</button>
+    `
+    : `
+      <button class="btn btn--primary btn--full back-btn">Back to Deck</button>
+      <button class="btn btn--secondary btn--full repeat-btn">Repeat this batch</button>
+    `;
 
   return {
     html: `
       <div class="card round-summary fade-in">
-        <h2>${title}</h2>
-        <p class="round-summary__subtitle">${subtitle}</p>
-        <div class="streak-pips">
-          <div class="pip ${pip1}" title="Round 1"></div>
-          <div class="pip ${pip2}" title="Round 2"></div>
-        </div>
-        ${unlockHtml}
-        <button class="btn btn--primary btn--full continue-btn">${btnLabel}</button>
+        <h2>Session complete</h2>
+        <div class="summary-lines">${linesHtml}</div>
+        <p class="round-summary__batch-status">${learnedCount} of ${total} card${total !== 1 ? 's' : ''} learned</p>
+        ${noticeHtml}
+        ${buttonsHtml}
       </div>
     `,
-    bind(root, onContinue) {
-      root.querySelector('.continue-btn').addEventListener('click', onContinue);
+    bind(root, { onRepeat, onProceed, onBack }) {
+      root.querySelector('.repeat-btn').addEventListener('click', onRepeat);
+      root.querySelector('.proceed-btn')?.addEventListener('click', onProceed);
+      root.querySelector('.back-btn')?.addEventListener('click', onBack);
     },
   };
 }

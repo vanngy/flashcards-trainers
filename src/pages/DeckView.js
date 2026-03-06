@@ -1,6 +1,7 @@
 import { BatchProgress } from '../components/BatchProgress.js';
 import { ColumnBrowser } from '../components/ColumnBrowser.js';
 import { createSession } from '../logic/studySession.js';
+import { deriveBatchState, findContinueBatch, computeEffectiveUnlocked } from '../logic/progressUtils.js';
 import { exportDeckAsCsv } from '../logic/parseCsv.js';
 
 function collectLeafNodes(nodes, acc) {
@@ -10,18 +11,19 @@ function collectLeafNodes(nodes, acc) {
   }
 }
 
-function progressSummaryHtml(mastered, inProgress, total) {
-  const locked = total - mastered - inProgress;
-  const pct = total > 0 ? Math.round(mastered / total * 100) : 0;
+function cardCountSummaryHtml(cards) {
+  const total = cards.length;
+  const learned  = cards.filter(c => c.learningState === 'learned' || c.learningState === 'mastered').length;
+  const mastered = cards.filter(c => c.learningState === 'mastered').length;
+  const learnedPct = total > 0 ? Math.round(learned / total * 100) : 0;
   const parts = [];
+  if (learned  > 0) parts.push(`${learned} learned`);
   if (mastered > 0) parts.push(`${mastered} mastered`);
-  if (inProgress > 0) parts.push(`${inProgress} in progress`);
-  if (locked > 0) parts.push(`${locked} locked`);
-  const statsText = parts.length > 0 ? parts.join(' · ') : `${total} batch${total !== 1 ? 'es' : ''}`;
+  const statsText = parts.length > 0 ? parts.join(' · ') : `${total} card${total !== 1 ? 's' : ''}`;
   return `
     <div class="progress-summary">
-      <div class="progress-bar"><div class="progress-bar__fill" style="width:${pct}%"></div></div>
-      <p class="progress-summary__stats">${pct}% &middot; ${statsText}</p>
+      <div class="progress-bar"><div class="progress-bar__fill" style="width:${learnedPct}%"></div></div>
+      <p class="progress-summary__stats">${learnedPct}% learned &middot; ${statsText}</p>
     </div>
   `;
 }
@@ -35,23 +37,15 @@ export function DeckView(state, navigate) {
 
   // ── Topic path ────────────────────────────────────────────────────────────
   if (deck.hasTopics) {
-    const leaves = [];
-    collectLeafNodes(deck.topicTree, leaves);
-    let tMastered = 0, tInProgress = 0, tTotal = 0;
-    for (const node of leaves) {
-      tTotal += node.batches.length;
-      tMastered += (node.progress?.batches || []).filter(b => b.status === 'mastered').length;
-      tInProgress += (node.progress?.batches || []).filter(b => b.status === 'in-progress').length;
-    }
-    const summaryHtml = progressSummaryHtml(tMastered, tInProgress, tTotal);
+    const summaryHtml = cardCountSummaryHtml(deck.cards);
 
     const selectedPath = state.routeParams.selectedPath || [];
     const cb = ColumnBrowser({
       topicTree: deck.topicTree,
       selectedPath,
       onSelect: newPath => navigate('deck', { deckId: deck.id, selectedPath: newPath }),
-      onStudy: node => {
-        state.session = createSession(node, node.progress.highestUnlockedBatch, deck.id);
+      onStudy: (node, batchIndex) => {
+        state.session = createSession(node, batchIndex, deck.id);
         navigate('study', { deckId: deck.id });
       },
     });
@@ -84,25 +78,27 @@ export function DeckView(state, navigate) {
   }
 
   // ── Flat path ─────────────────────────────────────────────────────────────
-  const { highestUnlockedBatch, deckComplete } = deck.progress;
-  const flatBatches = deck.progress.batches;
-  const flatMastered = flatBatches.filter(b => b.status === 'mastered').length;
-  const flatInProgress = flatBatches.filter(b => b.status === 'in-progress').length;
-  const summaryHtml = progressSummaryHtml(flatMastered, flatInProgress, flatBatches.length);
+  const batchStates = deck.batches.map(b => deriveBatchState(b));
+  const highestUnlockedBatch = computeEffectiveUnlocked(batchStates);
+  const summaryHtml = cardCountSummaryHtml(deck.cards);
 
   const bp = BatchProgress({
     batches: deck.batches,
     batchProgress: deck.progress.batches,
+    batchStates,
     highestUnlocked: highestUnlockedBatch,
-    deckComplete: deckComplete || false,
     batchNames: deck.batchNames || [],
   });
 
-  const btnHtml = deckComplete
-    ? `<p class="deck-complete-msg">All batches mastered!</p>`
-    : `<button class="btn btn--primary btn--full start-btn">
-        ${highestUnlockedBatch === 0 ? 'Start Batch 1' : `Continue — Batch ${highestUnlockedBatch + 1}`}
-       </button>`;
+  const continueBatch = findContinueBatch(deck);
+  let btnHtml;
+  if (continueBatch !== null) {
+    const isFirstStudy = continueBatch === 0 && batchStates[0] === 'unseen';
+    const label = isFirstStudy ? 'Start Batch 1' : `Continue — Batch ${continueBatch + 1}`;
+    btnHtml = `<button class="btn btn--primary btn--full start-btn">${label}</button>`;
+  } else {
+    btnHtml = `<p class="deck-complete-msg">All cards learned!</p>`;
+  }
 
   return {
     html: `
@@ -113,7 +109,7 @@ export function DeckView(state, navigate) {
           <p class="deck-header__meta">${deck.cards.length} cards &middot; ${deck.batches.length} batch${deck.batches.length !== 1 ? 'es' : ''}</p>
         </div>
         ${summaryHtml}
-        ${bp.html}
+        <div id="bp-mount">${bp.html}</div>
         ${btnHtml}
         <div class="deck-secondary-actions">
           <button class="btn btn--secondary btn--full be-open-btn">Edit batches</button>
@@ -134,10 +130,14 @@ export function DeckView(state, navigate) {
       const startBtn = root.querySelector('.start-btn');
       if (startBtn) {
         startBtn.addEventListener('click', () => {
-          state.session = createSession(deck, highestUnlockedBatch, deck.id);
+          state.session = createSession(deck, continueBatch, deck.id);
           navigate('study', { deckId: deck.id });
         });
       }
+      bp.bind(root.querySelector('#bp-mount'), batchIdx => {
+        state.session = createSession(deck, batchIdx, deck.id);
+        navigate('study', { deckId: deck.id });
+      });
     },
   };
 }

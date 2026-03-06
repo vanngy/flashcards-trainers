@@ -282,15 +282,19 @@ h2 {
   background: var(--surface);
   color: var(--text-muted);
 }
-/* pill layout: stacked label + date */
-.batch-pill { flex-direction: column; gap: 2px; }
-.batch-pill__date { font-size: 0.7rem; opacity: 0.7; font-weight: 400; }
 
-/* status colours */
-.batch-pill--mastered    { border-color: var(--accent-mastered); color: var(--accent-mastered); background: var(--success-light); }
-.batch-pill--in-progress { border-color: #e8a000; color: #7a5000; background: #fff8e1; }
-.batch-pill--available   { border-color: var(--border); color: var(--text-muted); background: var(--surface); }
-.batch-pill--locked      { opacity: 0.4; }
+/* status colours — four states */
+/* locked: faded */
+.batch-pill--locked   { opacity: 0.35; }
+/* unlocked / in-progress: bold dark */
+.batch-pill--available { border-color: var(--text); color: var(--text); background: var(--surface); }
+/* learned: green — good enough to move on */
+.batch-pill--learned  { border-color: #2e7d32; color: #2e7d32; background: #e8f5e9; }
+/* mastered: gold — genuinely stable */
+.batch-pill--mastered { border-color: #b8860b; color: #7a5800; background: #fffde7; }
+
+.batch-pill--clickable       { cursor: pointer; }
+.batch-pill--clickable:hover { opacity: 0.75; }
 
 /* ── Study view ─────────────────────────────────────────────────────────── */
 .study-nav {
@@ -304,35 +308,32 @@ h2 {
   align-items: center;
   gap: 10px;
 }
-.streak-display {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  font-weight: 500;
-}
 
-.study-card {
-  min-height: 160px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
 .study-card__meta {
   font-size: 0.78rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
+}
+.study-card {
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
 }
 .study-card__front {
   font-size: 1.3rem;
   font-weight: 700;
   line-height: 1.4;
   white-space: pre-wrap;
+  text-align: center;
 }
 
 /* ── Answer input ───────────────────────────────────────────────────────── */
-.answer-input textarea,
-.rewrite-ta {
+.answer-input textarea {
   width: 100%;
   min-height: 120px;
   padding: 12px 14px;
@@ -345,82 +346,110 @@ h2 {
   transition: border-color 0.15s;
   white-space: pre-wrap;
 }
-.answer-input textarea:focus,
-.rewrite-ta:focus {
+.answer-input textarea:focus {
   outline: none;
   border-color: var(--accent);
 }
 
 .answer-input__actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 10px;
   margin-top: 10px;
 }
 
-.feedback {
-  padding: 8px 14px;
-  border-radius: 8px;
-  margin-top: 10px;
-  font-weight: 500;
-  font-size: 0.9rem;
-}
-.feedback--incorrect { background: var(--error-light); color: var(--error); }
+.mark-correct-btn { margin-right: auto; }
 
-.mark-correct-btn { margin-top: 8px; }
-
-/* ── Rewrite prompt ─────────────────────────────────────────────────────── */
-.rewrite-prompt__label {
-  font-size: 0.88rem;
-  color: var(--text-muted);
-  margin-bottom: 10px;
-  font-weight: 500;
-}
-.rewrite-prompt__answer {
+/* ── Wrong answer solution box ──────────────────────────────────────────── */
+.wrong-answer-box {
+  width: 100%;
+  min-height: 120px;
+  padding: 12px 14px;
+  border: 2px solid var(--error);
+  border-radius: var(--radius-btn);
   font-size: 0.95rem;
-  line-height: 1.7;
+  font-family: inherit;
+  line-height: 1.6;
+  background: var(--error-light);
+  color: var(--text);
   white-space: pre-wrap;
-  opacity: 1;
+  word-break: break-word;
+}
+.diff-wrong {
+  color: var(--error);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+/* ── Rewrite ghost overlay (dual-textarea CSS grid) ─────────────────────── */
+/* Both textareas share the same grid cell so rendering is pixel-identical.  */
+.rewrite-field {
+  display: grid;
+  margin-bottom: 0;
+}
+.rewrite-field > textarea {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-height: 120px;
+  padding: 12px 14px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-btn);
+  font-size: 0.95rem;
+  font-family: inherit;
+  line-height: 1.6;
+  resize: none;
+  white-space: pre-wrap;
+  overflow-y: auto;
+}
+.rewrite-ghost-ta {
+  pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
-  background: var(--bg);
-  border: 1.5px solid var(--border);
-  padding: 12px 14px;
-  border-radius: 8px;
-  margin-bottom: 14px;
-  pointer-events: none;
-  transition: opacity 0.6s ease;
-}
-.rewrite-prompt__answer--dim {
-  opacity: 0.25;
-}
-.rewrite-ta { display: block; }
-
-/* ── Round summary ──────────────────────────────────────────────────────── */
-.round-summary { text-align: center; }
-.round-summary h2 { font-size: 1.4rem; margin-bottom: 8px; }
-.round-summary__subtitle {
-  color: var(--text-muted);
-  font-size: 0.92rem;
-  margin-bottom: 24px;
-}
-
-.streak-pips {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  margin-bottom: 24px;
-}
-.pip {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 2px solid var(--border);
+  opacity: 0.28;
   background: var(--surface);
-  transition: background 0.3s, border-color 0.3s;
+  color: var(--text);
+  overflow-y: hidden; /* scrolled programmatically */
+  cursor: default;
 }
-.pip--filled {
-  background: var(--success);
-  border-color: var(--success);
+.rewrite-ta {
+  background: transparent;
+  caret-color: var(--text);
+  color: var(--text);
+}
+.rewrite-ta:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ── Session summary ────────────────────────────────────────────────────── */
+.round-summary h2 { font-size: 1.4rem; margin-bottom: 16px; }
+
+.summary-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.summary-line {
+  font-size: 0.92rem;
+  padding: 4px 0;
+}
+.summary-line--up      { color: var(--success); font-weight: 600; }
+.summary-line--down    { color: var(--error);   font-weight: 600; }
+.summary-line--slip    { color: #e8a000;        font-weight: 600; }
+.summary-line--reset   { color: var(--text-muted); }
+.summary-line--neutral { color: var(--text-muted); }
+
+.round-summary__batch-status {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 4px;
 }
 
 .unlock-msg {
@@ -429,6 +458,8 @@ h2 {
   font-size: 1rem;
   margin-bottom: 20px;
 }
+
+.round-summary .repeat-btn { margin-top: 10px; }
 
 /* ── Wide mode ──────────────────────────────────────────────────────────── */
 .app--wide { max-width: 900px; }

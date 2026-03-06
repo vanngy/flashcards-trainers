@@ -1,6 +1,7 @@
 import { splitIntoBatches } from './splitIntoBatches.js';
 import { buildTopicTree } from './buildTopicTree.js';
 import { enforceMaxBatchSize } from './batchUtils.js';
+import { deriveBatchState, migrateCardState } from './progressUtils.js';
 
 export function makeDeck(id, title, cards, progress, topicProgress = {}, batchNames = []) {
   let batches;
@@ -18,16 +19,32 @@ export function makeDeck(id, title, cards, progress, topicProgress = {}, batchNa
   } else {
     batches = splitIntoBatches(cards);
   }
-  const batchStatuses = batches.map((_, i) => {
-    const existing = progress?.batches?.[i];
-    if (existing) return existing;
-    const hob = progress?.highestUnlockedBatch ?? 0;
-    if (!progress?.batches) {
-      if (i < hob) return { status: 'mastered', lastStudied: null };
-      if (i === hob && hob > 0) return { status: 'in-progress', lastStudied: null };
+
+  // Migrate flat-mode cards that lack learningState, inferring from old batch status.
+  // Skip topic-mode cards — those are migrated in buildTopicTree per node.
+  const isTopicMode = processedCards.some(c => c.topic);
+  if (!isTopicMode) {
+    for (let i = 0; i < batches.length; i++) {
+      const oldStatus = progress?.batches?.[i]?.status ?? 'unseen';
+      for (const card of batches[i]) {
+        migrateCardState(card, oldStatus);
+      }
     }
-    return { status: 'unseen', lastStudied: null };
-  });
+  }
+
+  // Recompute highestUnlockedBatch from current card states so migration is reflected.
+  let computedHob = progress?.highestUnlockedBatch ?? 0;
+  for (let i = 0; i < batches.length; i++) {
+    const bs = deriveBatchState(batches[i]);
+    if ((bs === 'learned' || bs === 'mastered') && i + 1 < batches.length) {
+      computedHob = Math.max(computedHob, i + 1);
+    }
+  }
+
+  // Per-batch progress: only lastStudied is stored; status is derived at render time.
+  const batchProgress = batches.map((_, i) => ({
+    lastStudied: progress?.batches?.[i]?.lastStudied ?? null,
+  }));
 
   const topicTree = buildTopicTree(processedCards, topicProgress);
   const hasTopics = topicTree.length > 0;
@@ -41,9 +58,9 @@ export function makeDeck(id, title, cards, progress, topicProgress = {}, batchNa
     batches,
     batchNames,
     progress: {
-      highestUnlockedBatch: progress?.highestUnlockedBatch ?? 0,
+      highestUnlockedBatch: computedHob,
       deckComplete: progress?.deckComplete ?? false,
-      batches: batchStatuses,
+      batches: batchProgress,
     },
     topicTree,
     hasTopics,

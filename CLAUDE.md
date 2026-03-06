@@ -32,7 +32,7 @@ function MyComponent(props) {
 ## Architecture
 
 ### Routing and state (`src/App.js`)
-- Single global `state` object: `{ currentView, routeParams, decks, session }`
+- Single global `state` object: `{ currentView, routeParams, decks, session, sync, syncActions }`
 - `navigate(view, params)` sets `state.currentView` + `state.routeParams`, then calls `renderApp()`
 - `renderApp()` calls the current page function and sets `container.innerHTML`
 - Views: `home`, `deck`, `study`, `topicEditor`, `batchEditor`, `cardEditor`
@@ -41,8 +41,13 @@ function MyComponent(props) {
 
 ### Persistence (`src/storage.js`)
 - All state serialized to `localStorage` under key `'flashcard_trainer'`
-- `saveToStorage(state)` / `loadFromStorage()` — called explicitly after mutations
+- `saveToStorage(state, { triggerSync })` / `loadFromStorage()` — called explicitly after mutations
 - Only `id`, `title`, `cards`, `progress`, `topicProgress`, `batchNames` are persisted; `batches`, `topicTree`, etc. are recomputed by `makeDeck()` on load
+- `serializeState(state)` — extracts the persistable shape; used by both localStorage and Gist sync
+- Sync config (token + gistId) stored separately under `'flashcard_sync'`
+
+### GitHub Gist sync (`src/sync.js`)
+Cross-device sync via a personal GitHub Gist. `state.sync = { status: 'idle'|'ok'|'error', message }` reflects current sync state. `state.syncActions.connect(token)` and `state.syncActions.disconnect()` manage the connection. On startup, if a token+gistId are stored, the app pulls from the Gist and merges. After each `saveToStorage`, a debounced push (3 s) writes to the Gist. Pass `{ triggerSync: false }` to `saveToStorage` to suppress the push (used when applying incoming Gist data).
 
 ### Deck data model (`src/logic/makeDeck.js`)
 `makeDeck(id, title, cards, progress, topicProgress, batchNames)` returns a deck object. Two modes:
@@ -66,11 +71,25 @@ Builds a tree of nodes from card `topic` / `subtopic` / `subsubtopic` fields. Ea
 - `currentBatchOf(card, deckCardIndex, deck)` / `batchCountFor(card, deck)` — batch lookup helpers used in editors
 - `batchOptionsHtml(card, cardIndex, deck)` — renders `<option>` elements for batch selectors in editors
 
+### Progress object structure
+Stored on each deck at `deck.progress`:
+```js
+{
+  highestUnlockedBatch: 0,       // index of the furthest unlocked batch
+  deckComplete: false,
+  batches: [                     // one entry per batch
+    { status: 'unseen' | 'in-progress' | 'mastered', lastStudied: 'YYYY-MM-DD' | null }
+  ]
+}
+```
+`topicProgress` (persisted separately) maps `pathKey → { highestUnlockedBatch, deckComplete, batches }` for topic-mode nodes.
+
 ### Study session (`src/logic/studySession.js`)
 In-memory state machine passed through `state.session`. Key functions:
 - `createSession(studyTarget, batchIndex, deckId)` — `studyTarget` is either a deck or a topic-tree node (both have `.batches`)
-- `submitAnswer(session, typed)` — returns `{ correct, rewriteTriggered, roundComplete, batchUnlocked }`
+- `submitAnswer(session, typed)` — returns `{ correct, rewriteTriggered, roundComplete, batchUnlocked }`. After **2 wrong attempts** on the same card, `rewriteMode` is set and the round is marked unclean.
 - `markCorrect(session)` — typo-forgiveness: advances card as correct without setting `isRoundClean = false` (round stays clean, no rewrite flag)
+- `getSessionSummary(session)` — returns `{ batchIndex, cardIndex, totalCards, phase, cleanStreak }`
 
 Session phases: `'initial'` (first pass through batch) → `'mastery'` (requires 2 clean rounds to unlock next batch). A round is clean only if no card triggered rewrite mode.
 
